@@ -1,9 +1,19 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import io
 
 app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+          CORSMiddleware,
+          allow_origins=["*"],  # Allows all origins; change this to specific domains if needed
+          allow_credentials=True,
+          allow_methods=["*"],  # Allows all HTTP methods
+          allow_headers=["*"],  # Allows all headers
+)
 
 def set_page_margins(page, margins):
           rect = page.rect
