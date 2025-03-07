@@ -2,15 +2,15 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
-import io
+import tempfile
+import os
 
 app = FastAPI()
 
 # Configure CORS
 app.add_middleware(
           CORSMiddleware,
-          allow_origins=["*"],
-          # Allows all origins; change this to specific domains if needed
+          allow_origins=["*"],  # Allows all origins (change to specific domains if needed)
           allow_credentials=True,
           allow_methods=["*"],  # Allows all HTTP methods
           allow_headers=["*"],  # Allows all headers
@@ -26,9 +26,9 @@ def set_page_margins(page, margins):
           )
           page.set_mediabox(new_rect)
 
-def apply_margins(pdf_bytes, mode, margins, margins_odd=None, margins_even=None, selected_pages=None,
+def apply_margins(input_path, output_path, mode, margins, margins_odd=None, margins_even=None, selected_pages=None,
                   group_margins=None):
-          doc = fitz.open(stream=pdf_bytes, filetype="pdf")  # Open PDF from bytes
+          doc = fitz.open(input_path)  # Open the PDF from file instead of memory
 
           if mode == "all":
                     for page in doc:
@@ -60,13 +60,9 @@ def apply_margins(pdf_bytes, mode, margins, margins_odd=None, margins_even=None,
                                         if start <= page_num <= end:
                                                   set_page_margins(page, margins_tuple)
 
-          # Save the modified PDF to memory
-          output_pdf = io.BytesIO()
-          doc.save(output_pdf)
+          # Save to a temporary file
+          doc.save(output_path)
           doc.close()
-          output_pdf.seek(0)  # Reset stream position
-
-          return output_pdf
 
 @app.post("/upload/")
 async def upload_pdf(
@@ -78,22 +74,34 @@ async def upload_pdf(
           selected_pages: str = Form(""),
           group_margins: str = Form("")
 ):
-          # Read file into memory
-          pdf_bytes = await file.read()
+          # Save uploaded file to a temporary file
+          with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_input:
+                    temp_input.write(await file.read())
+                    temp_input_path = temp_input.name
 
-          # Convert string margins to tuples
-          margins = tuple(map(int, margins.split(",")))
-          margins_odd = tuple(map(int, margins_odd.split(",")))
-          margins_even = tuple(map(int, margins_even.split(",")))
-          selected_pages = list(map(int, selected_pages.split(","))) if selected_pages else []
+          temp_output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
 
-          # Process PDF in memory
-          processed_pdf = apply_margins(pdf_bytes, mode, margins, margins_odd, margins_even, selected_pages,
-                                        group_margins)
+          try:
+                    # Convert string margins to tuples
+                    margins = tuple(map(int, margins.split(",")))
+                    margins_odd = tuple(map(int, margins_odd.split(",")))
+                    margins_even = tuple(map(int, margins_even.split(",")))
+                    selected_pages = list(map(int, selected_pages.split(","))) if selected_pages else []
 
-          # Return the processed PDF as a response
-          return StreamingResponse(processed_pdf, media_type="application/pdf",
-                                   headers={"Content-Disposition": f"attachment; filename=modified_{file.filename}"})
+                    # Process PDF
+                    apply_margins(temp_input_path, temp_output_path, mode, margins, margins_odd, margins_even,
+                                  selected_pages,
+                                  group_margins)
+
+                    # Stream the processed PDF to the client
+                    return StreamingResponse(open(temp_output_path, "rb"), media_type="application/pdf",
+                                             headers={
+                                                       "Content-Disposition": f"attachment; filename=modified_{file.filename}"})
+
+          finally:
+                    # Cleanup temporary files
+                    os.remove(temp_input_path)
+                    os.remove(temp_output_path)
 
 @app.get("/")
 def home():
