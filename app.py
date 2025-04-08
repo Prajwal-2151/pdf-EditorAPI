@@ -1,9 +1,13 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import tempfile
 import os
+
+from sqlalchemy.orm import Session
+from db import SessionLocal
+from models import User
 
 app = FastAPI()
 
@@ -12,9 +16,17 @@ app.add_middleware(
           CORSMiddleware,
           allow_origins=["*"],  # Allows all origins (change to specific domains if needed)
           allow_credentials=True,
-          allow_methods=["*"],  # Allows all HTTP methods
-          allow_headers=["*"],  # Allows all headers
+          allow_methods=["*"],
+          allow_headers=["*"],
 )
+
+# Dependency to get DB session
+def get_db():
+          db = SessionLocal()
+          try:
+                    yield db
+          finally:
+                    db.close()
 
 def set_page_margins(page, margins):
           rect = page.rect
@@ -26,9 +38,9 @@ def set_page_margins(page, margins):
           )
           page.set_mediabox(new_rect)
 
-def apply_margins(input_path, output_path, mode, margins, margins_odd=None, margins_even=None, selected_pages=None,
-                  group_margins=None):
-          doc = fitz.open(input_path)  # Open the PDF from file instead of memory
+def apply_margins(input_path, output_path, mode, margins, margins_odd=None, margins_even=None,
+                  selected_pages=None, group_margins=None):
+          doc = fitz.open(input_path)
 
           if mode == "all":
                     for page in doc:
@@ -60,7 +72,6 @@ def apply_margins(input_path, output_path, mode, margins, margins_odd=None, marg
                                         if start <= page_num <= end:
                                                   set_page_margins(page, margins_tuple)
 
-          # Save to a temporary file
           doc.save(output_path)
           doc.close()
 
@@ -74,7 +85,6 @@ async def upload_pdf(
           selected_pages: str = Form(""),
           group_margins: str = Form("")
 ):
-          # Save uploaded file to a temporary file
           with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_input:
                     temp_input.write(await file.read())
                     temp_input_path = temp_input.name
@@ -82,26 +92,29 @@ async def upload_pdf(
           temp_output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
 
           try:
-                    # Convert string margins to tuples
                     margins = tuple(map(int, margins.split(",")))
                     margins_odd = tuple(map(int, margins_odd.split(",")))
                     margins_even = tuple(map(int, margins_even.split(",")))
                     selected_pages = list(map(int, selected_pages.split(","))) if selected_pages else []
 
-                    # Process PDF
-                    apply_margins(temp_input_path, temp_output_path, mode, margins, margins_odd, margins_even,
-                                  selected_pages,
-                                  group_margins)
+                    apply_margins(temp_input_path, temp_output_path, mode, margins, margins_odd,
+                                  margins_even, selected_pages, group_margins)
 
-                    # Stream the processed PDF to the client
                     return StreamingResponse(open(temp_output_path, "rb"), media_type="application/pdf",
                                              headers={
                                                        "Content-Disposition": f"attachment; filename=modified_{file.filename}"})
 
           finally:
-                    # Cleanup temporary files
                     os.remove(temp_input_path)
                     os.remove(temp_output_path)
+
+@app.post("/login")
+def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+          user = db.query(User).filter(User.username == username).first()
+          if not user or user.password != password:
+                    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+          return {"message": "Login successful", "username": user.username}
 
 @app.get("/")
 def home():
