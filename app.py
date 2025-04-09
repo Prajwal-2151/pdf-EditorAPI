@@ -4,36 +4,51 @@ from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import tempfile
 import os
-
 from sqlalchemy.orm import Session
 from db import SessionLocal
 from models import User
 
 app = FastAPI()
 
-# 🚫 Mobile device blocking middleware
-MOBILE_KEYWORDS = ["mobile", "android", "iphone", "ipad", "tablet"]
-
-@app.middleware("http")
-async def block_mobile_devices(request: Request, call_next):
-          user_agent = request.headers.get("user-agent", "").lower()
-          if any(keyword in user_agent for keyword in MOBILE_KEYWORDS):
-                    return JSONResponse(
-                              status_code=403,
-                              content={"detail": "This site is accessible only on desktop/laptop devices."}
-                    )
-          return await call_next(request)
-
-# Configure CORS
+# ✅ CORS Configuration
 app.add_middleware(
           CORSMiddleware,
-          allow_origins=["*"],  # Allows all origins (change to specific domains if needed)
+          allow_origins=[""],  # Replace "" with allowed domains in production
           allow_credentials=True,
           allow_methods=["*"],
           allow_headers=["*"],
 )
 
-# Dependency to get DB session
+# ✅ Enhanced Mobile/Tablet Blocking Middleware
+MOBILE_KEYWORDS = [
+          "mobile", "android", "iphone", "ipad", "tablet",
+          "blackberry", "opera mini", "iemobile", "kindle",
+          "webos", "silk", "fennec", "nokia"
+]
+
+@app.middleware("http")
+async def block_mobile_devices(request: Request, call_next):
+          user_agent = request.headers.get("user-agent", "").lower()
+
+          # Block based on common mobile keywords
+          if any(keyword in user_agent for keyword in MOBILE_KEYWORDS):
+                    return JSONResponse(
+                              status_code=403,
+                              content={"detail": "🚫 This site is only accessible on desktop or laptop devices."}
+                    )
+
+          # Also block based on sec-ch-ua-mobile header (used in Chrome/Edge mobile in desktop mode)
+          if "sec-ch-ua-mobile" in request.headers:
+                    if request.headers["sec-ch-ua-mobile"].lower() == "?1":
+                              return JSONResponse(
+                                        status_code=403,
+                                        content={
+                                                  "detail": "🚫 This site is only accessible on desktop or laptop devices."}
+                              )
+
+          return await call_next(request)
+
+# ✅ Database Dependency
 def get_db():
           db = SessionLocal()
           try:
@@ -41,6 +56,7 @@ def get_db():
           finally:
                     db.close()
 
+# ✅ PDF Margin Helper
 def set_page_margins(page, margins):
           rect = page.rect
           new_rect = fitz.Rect(
@@ -51,6 +67,7 @@ def set_page_margins(page, margins):
           )
           page.set_mediabox(new_rect)
 
+# ✅ Margin Application Logic
 def apply_margins(input_path, output_path, mode, margins, margins_odd=None, margins_even=None,
                   selected_pages=None, group_margins=None):
           doc = fitz.open(input_path)
@@ -88,6 +105,7 @@ def apply_margins(input_path, output_path, mode, margins, margins_odd=None, marg
           doc.save(output_path)
           doc.close()
 
+# ✅ PDF Upload Endpoint
 @app.post("/upload/")
 async def upload_pdf(
           file: UploadFile = File(...),
@@ -115,12 +133,13 @@ async def upload_pdf(
 
                     return StreamingResponse(open(temp_output_path, "rb"), media_type="application/pdf",
                                              headers={
-                                                       "Content-Disposition": f"attachment; filename=modified_{file.filename}"})
-
+                                                       "Content-Disposition": f"attachment; filename=modified_{file.filename}"
+                                             })
           finally:
                     os.remove(temp_input_path)
                     os.remove(temp_output_path)
 
+# ✅ Login Endpoint
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
           user = db.query(User).filter(User.username == username).first()
@@ -129,6 +148,7 @@ def login(username: str = Form(...), password: str = Form(...), db: Session = De
 
           return {"message": "Login successful", "username": user.username}
 
+# ✅ Health Check/Home Endpoint
 @app.get("/")
 def home():
-          return {"message": "PDF Margin API is running. Use /upload/ to modify a PDF."}
+          return {"message": "📘 PDF Margin API is running. Use /upload/ to modify a PDF."}
