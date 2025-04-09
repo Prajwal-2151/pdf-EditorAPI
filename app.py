@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import tempfile
@@ -10,6 +10,19 @@ from db import SessionLocal
 from models import User
 
 app = FastAPI()
+
+# 🚫 Mobile device blocking middleware
+MOBILE_KEYWORDS = ["mobile", "android", "iphone", "ipad", "tablet"]
+
+@app.middleware("http")
+async def block_mobile_devices(request: Request, call_next):
+          user_agent = request.headers.get("user-agent", "").lower()
+          if any(keyword in user_agent for keyword in MOBILE_KEYWORDS):
+                    return JSONResponse(
+                              status_code=403,
+                              content={"detail": "This site is accessible only on desktop/laptop devices."}
+                    )
+          return await call_next(request)
 
 # Configure CORS
 app.add_middleware(
