@@ -113,7 +113,7 @@ async def upload_pdf(
                     os.remove(temp_output_path)
 
 # ✅ Login Endpoint with session control
-@app.post("/login")
+@app.post("/login/")
 def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
           user = db.query(User).filter(User.username == username).first()
           if not user or user.password != password:
@@ -129,7 +129,7 @@ def login(username: str = Form(...), password: str = Form(...), db: Session = De
           return {"message": "Login successful", "username": user.username, "token": session_token}
 
 # ✅ Logout Endpoint
-@app.post("/logout")
+@app.post("/logout/")
 def logout(token: str = Form(...), db: Session = Depends(get_db)):
           user = db.query(User).filter(User.session_token == token).first()
           if not user:
