@@ -1,17 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import fitz  # PyMuPDF
-import tempfile
 import os
+import tempfile
 import uuid
+
+import fitz  # PyMuPDF
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
 from db import SessionLocal
 from models import User
-from passlib.context import CryptContext
-
-# ✅ Password Hasher
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI()
 
@@ -118,7 +116,7 @@ async def upload_pdf(
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
           user = db.query(User).filter(User.username == username).first()
-          if not user or not pwd_context.verify(password, user.password):
+          if not user or user.password != password:
                     raise HTTPException(status_code=401, detail="Invalid username or password")
 
           if user.session_token:
