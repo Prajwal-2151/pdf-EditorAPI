@@ -1,52 +1,28 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import tempfile
 import os
+import uuid
 from sqlalchemy.orm import Session
 from db import SessionLocal
 from models import User
+from passlib.context import CryptContext
+
+# ✅ Password Hasher
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI()
 
-# ✅ CORS Configuration
+# ✅ CORS
 app.add_middleware(
           CORSMiddleware,
-          allow_origins=[""],  # Replace "" with allowed domains in production
+          allow_origins=["*"],  # Change in production
           allow_credentials=True,
           allow_methods=["*"],
           allow_headers=["*"],
 )
-
-# ✅ Enhanced Mobile/Tablet Blocking Middleware
-MOBILE_KEYWORDS = [
-          "mobile", "android", "iphone", "ipad", "tablet",
-          "blackberry", "opera mini", "iemobile", "kindle",
-          "webos", "silk", "fennec", "nokia"
-]
-
-@app.middleware("http")
-async def block_mobile_devices(request: Request, call_next):
-          user_agent = request.headers.get("user-agent", "").lower()
-
-          # Block based on common mobile keywords
-          if any(keyword in user_agent for keyword in MOBILE_KEYWORDS):
-                    return JSONResponse(
-                              status_code=403,
-                              content={"detail": "🚫 This site is only accessible on desktop or laptop devices."}
-                    )
-
-          # Also block based on sec-ch-ua-mobile header (used in Chrome/Edge mobile in desktop mode)
-          if "sec-ch-ua-mobile" in request.headers:
-                    if request.headers["sec-ch-ua-mobile"].lower() == "?1":
-                              return JSONResponse(
-                                        status_code=403,
-                                        content={
-                                                  "detail": "🚫 This site is only accessible on desktop or laptop devices."}
-                              )
-
-          return await call_next(request)
 
 # ✅ Database Dependency
 def get_db():
@@ -105,7 +81,7 @@ def apply_margins(input_path, output_path, mode, margins, margins_odd=None, marg
           doc.save(output_path)
           doc.close()
 
-# ✅ PDF Upload Endpoint
+# ✅ Upload Endpoint
 @app.post("/upload/")
 async def upload_pdf(
           file: UploadFile = File(...),
@@ -133,22 +109,39 @@ async def upload_pdf(
 
                     return StreamingResponse(open(temp_output_path, "rb"), media_type="application/pdf",
                                              headers={
-                                                       "Content-Disposition": f"attachment; filename=modified_{file.filename}"
-                                             })
+                                                       "Content-Disposition": f"attachment; filename=modified_{file.filename}"})
           finally:
                     os.remove(temp_input_path)
                     os.remove(temp_output_path)
 
-# ✅ Login Endpoint
+# ✅ Login Endpoint with session control
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
           user = db.query(User).filter(User.username == username).first()
-          if not user or user.password != password:
+          if not user or not pwd_context.verify(password, user.password):
                     raise HTTPException(status_code=401, detail="Invalid username or password")
 
-          return {"message": "Login successful", "username": user.username}
+          if user.session_token:
+                    raise HTTPException(status_code=403, detail="User already logged in on another device")
 
-# ✅ Health Check/Home Endpoint
+          session_token = str(uuid.uuid4())
+          user.session_token = session_token
+          db.commit()
+
+          return {"message": "Login successful", "username": user.username, "token": session_token}
+
+# ✅ Logout Endpoint
+@app.post("/logout")
+def logout(token: str = Form(...), db: Session = Depends(get_db)):
+          user = db.query(User).filter(User.session_token == token).first()
+          if not user:
+                    raise HTTPException(status_code=401, detail="Invalid session token")
+
+          user.session_token = None
+          db.commit()
+          return {"message": "Logout successful"}
+
+# ✅ Health Check
 @app.get("/")
 def home():
           return {"message": "📘 PDF Margin API is running. Use /upload/ to modify a PDF."}
