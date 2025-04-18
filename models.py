@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, DateTime
+from datetime import datetime
 from db import Base
 
 class User(Base):
@@ -8,3 +9,4 @@ class User(Base):
           username = Column(String(50), unique=True, index=True)
           password = Column(String(255))  # Note: No hashing for now
           session_token = Column(String, nullable=True)
+          session_token_created_at = Column(DateTime, nullable=True)  # ✅ New field

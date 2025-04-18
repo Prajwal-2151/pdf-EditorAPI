@@ -1,6 +1,7 @@
 import os
 import tempfile
 import uuid
+from datetime import datetime, timedelta
 
 import fitz  # PyMuPDF
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
@@ -112,6 +113,12 @@ async def upload_pdf(
                     os.remove(temp_input_path)
                     os.remove(temp_output_path)
 
+# ✅ Utility: Check if session is expired
+def is_token_expired(user: User) -> bool:
+          if not user.session_token_created_at:
+                    return True
+          return datetime.utcnow() - user.session_token_created_at > timedelta(hours=10)
+
 # ✅ Login Endpoint with session control
 @app.post("/login/")
 def login(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
@@ -119,11 +126,12 @@ def login(username: str = Form(...), password: str = Form(...), db: Session = De
           if not user or user.password != password:
                     raise HTTPException(status_code=401, detail="Invalid username or password")
 
-          if user.session_token:
+          if user.session_token and not is_token_expired(user):
                     raise HTTPException(status_code=403, detail="User already logged in on another device")
 
           session_token = str(uuid.uuid4())
           user.session_token = session_token
+          user.session_token_created_at = datetime.utcnow()
           db.commit()
 
           return {"message": "Login successful", "username": user.username, "token": session_token}
@@ -132,10 +140,13 @@ def login(username: str = Form(...), password: str = Form(...), db: Session = De
 @app.post("/logout/")
 def logout(token: str = Form(...), db: Session = Depends(get_db)):
           user = db.query(User).filter(User.session_token == token).first()
+
           if not user:
                     raise HTTPException(status_code=401, detail="Invalid session token")
 
+          # Always expire session on logout, even if token is old
           user.session_token = None
+          user.session_token_created_at = None
           db.commit()
           return {"message": "Logout successful"}
 
