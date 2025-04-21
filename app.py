@@ -117,7 +117,7 @@ async def upload_pdf(
 def is_token_expired(user: User) -> bool:
           if not user.session_token_created_at:
                     return True
-          return datetime.utcnow() - user.session_token_created_at > timedelta(hours=10)
+          return datetime.utcnow() - user.session_token_created_at > timedelta(hours=15)
 
 # ✅ Login Endpoint with session control
 @app.post("/login/")
